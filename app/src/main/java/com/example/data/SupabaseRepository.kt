@@ -19,8 +19,8 @@ import kotlinx.serialization.json.JsonPrimitive
 class SupabaseRepository(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("supabase_auth", Context.MODE_PRIVATE)
     
-    private val url = BuildConfig.SUPABASE_URL.ifEmpty { "https://xyzplaceholder.supabase.co" }
-    val anonKey = BuildConfig.SUPABASE_ANON_KEY.ifEmpty { "placeholder" }
+    val url: String = BuildConfig.SUPABASE_URL
+    val anonKey: String = BuildConfig.SUPABASE_ANON_KEY
 
     var accessToken: String?
         get() = prefs.getString("access_token", null)
@@ -244,6 +244,9 @@ class SupabaseRepository(context: Context) {
     }
 
     suspend fun getSignedUrl(path: String): String? {
+        if (path.startsWith("http://") || path.startsWith("https://")) {
+            return path
+        }
         val token = accessToken ?: return null
         return try {
             val resp = client.post("$url/storage/v1/object/sign/videos/$path") {

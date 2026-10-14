@@ -21,8 +21,8 @@ android {
             useSupportLibrary = true
         }
 
-        buildConfigField("String", "SUPABASE_URL", "\"https://xyzplaceholder.supabase.co\"")
-        buildConfigField("String", "SUPABASE_ANON_KEY", "\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder\"")
+        buildConfigField("String", "SUPABASE_URL", "\"https://nwzwmmutoidsmdzvcuxf.supabase.co\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"sb_publishable_YJdMQEx7rqosN7npkYLvlw_Q_trNt4s\"")
     }
 
     signingConfigs {
