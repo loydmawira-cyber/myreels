@@ -10,12 +10,25 @@ supabase/   Database schema: users, credits, series, videos, storage, security r
 ```
 
 ## How it fits together
-1. User signs up in the app (Supabase Auth) and gets 3 free credits.
+1. User signs up in the app (Supabase Auth). In free mode they get a few free videos per day (see below).
 2. User creates a *series* (niche, art style, voice, length, optional music).
-3. "Generate a video" calls `request_video()` → spends a credit, queues a job.
+3. "Generate a video" calls `request_video()` → checks limits (or spends a credit), queues a job.
 4. The worker claims the job, produces the video, uploads it to Supabase Storage.
 5. The app shows live progress and then plays the video, with Save and Share buttons
    (Share opens TikTok / Instagram / YouTube on the phone; no platform approvals needed).
+
+## Launch mode: no payments (default)
+The app starts in **free mode**: no credits, no billing. Limits live in one row you edit in
+Supabase → Table Editor → `app_settings`:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `free_mode` | `true` | `true` = free daily videos; `false` = credit system (when payments are added) |
+| `daily_limit_per_user` | `2` | Free videos each user can make per day |
+| `global_daily_limit` | `50` | Max videos per day across all users (caps your OpenAI bill) |
+| `invite_only` | `false` | `true` = only emails in `allowed_emails` can generate videos |
+
+Failed videos don't count toward limits. Also set a monthly budget limit in OpenAI as a final safety net.
 
 ## Setup (in order)
 

@@ -68,22 +68,92 @@ create policy "read own videos" on public.videos for select using (auth.uid() = 
 create policy "delete own videos" on public.videos for delete using (auth.uid() = user_id);
 -- Inserts go through request_video() so credits are enforced server-side.
 
--- 5. Request a video: checks + spends a credit atomically
+-- 5. App settings: one row you edit in Supabase -> Table Editor -> app_settings
+--    free_mode = true  -> no payments/credits; each user gets daily_limit_per_user videos per day
+--    free_mode = false -> credit system (for when payments are added)
+--    invite_only = true -> only emails listed in allowed_emails can generate videos
+--    global_daily_limit -> hard cap on videos per day across ALL users (protects your OpenAI bill)
+create table if not exists public.app_settings (
+  id int primary key default 1 check (id = 1),
+  free_mode boolean not null default true,
+  daily_limit_per_user int not null default 2,
+  global_daily_limit int not null default 50,
+  invite_only boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+insert into public.app_settings (id) values (1) on conflict (id) do nothing;
+alter table public.app_settings enable row level security;
+create policy "anyone signed in can read settings" on public.app_settings for select to authenticated using (true);
+
+create table if not exists public.allowed_emails (
+  email text primary key,
+  note text,
+  added_at timestamptz not null default now()
+);
+alter table public.allowed_emails enable row level security; -- no policies: only you (dashboard) can see/edit
+
+alter table public.videos add column if not exists used_credit boolean not null default false;
+
+-- 6. Request a video: enforces invite list, daily limits and credits atomically
 create or replace function public.request_video(p_series_id uuid)
 returns uuid language plpgsql security definer set search_path = public as $$
-declare v_id uuid;
+declare
+  v_id uuid;
+  cfg app_settings;
+  v_used_credit boolean := false;
+  v_today_user int;
+  v_today_all int;
 begin
+  select * into cfg from app_settings where id = 1;
+
   if not exists (select 1 from series where id = p_series_id and user_id = auth.uid()) then
     raise exception 'series not found';
   end if;
-  update profiles set credits = credits - 1 where id = auth.uid() and credits > 0;
-  if not found then raise exception 'no credits left'; end if;
-  insert into videos (user_id, series_id) values (auth.uid(), p_series_id) returning id into v_id;
+
+  if cfg.invite_only and not exists (
+    select 1 from allowed_emails where lower(email) = lower(auth.jwt()->>'email')
+  ) then
+    raise exception 'The app is invite-only right now. Ask for an invite to start creating videos.';
+  end if;
+
+  select count(*) into v_today_all from videos
+    where created_at >= date_trunc('day', now()) and status <> 'failed';
+  if v_today_all >= cfg.global_daily_limit then
+    raise exception 'We''ve hit today''s video limit. Please try again tomorrow.';
+  end if;
+
+  if cfg.free_mode then
+    select count(*) into v_today_user from videos
+      where user_id = auth.uid() and created_at >= date_trunc('day', now()) and status <> 'failed';
+    if v_today_user >= cfg.daily_limit_per_user then
+      raise exception 'You''ve used your % free videos for today. Come back tomorrow!', cfg.daily_limit_per_user;
+    end if;
+  else
+    update profiles set credits = credits - 1 where id = auth.uid() and credits > 0;
+    if not found then raise exception 'no credits left'; end if;
+    v_used_credit := true;
+  end if;
+
+  insert into videos (user_id, series_id, used_credit)
+    values (auth.uid(), p_series_id, v_used_credit) returning id into v_id;
   return v_id;
 end $$;
 grant execute on function public.request_video(uuid) to authenticated;
 
--- 6. Worker claim: atomically grab the oldest queued job (called with service role)
+-- What the app shows on the home screen
+create or replace function public.my_quota()
+returns json language sql security definer set search_path = public stable as $$
+  select json_build_object(
+    'free_mode', s.free_mode,
+    'credits', (select credits from profiles where id = auth.uid()),
+    'daily_limit', s.daily_limit_per_user,
+    'used_today', (select count(*) from videos where user_id = auth.uid()
+                     and created_at >= date_trunc('day', now()) and status <> 'failed')
+  ) from app_settings s where s.id = 1;
+$$;
+grant execute on function public.my_quota() to authenticated;
+
+-- 7. Worker claim: atomically grab the oldest queued job (called with service role)
 create or replace function public.claim_next_video()
 returns setof public.videos language sql security definer set search_path = public as $$
   update videos set status = 'scripting', locked_at = now(), updated_at = now()
@@ -95,11 +165,11 @@ returns setof public.videos language sql security definer set search_path = publ
 $$;
 revoke execute on function public.claim_next_video() from public, anon, authenticated;
 
--- 7. Storage bucket for finished videos (private; app gets signed URLs)
+-- 8. Storage bucket for finished videos (private; app gets signed URLs)
 insert into storage.buckets (id, name, public) values ('videos', 'videos', false)
   on conflict (id) do nothing;
 create policy "read own video files" on storage.objects for select
   using (bucket_id = 'videos' and (storage.foldername(name))[1] = auth.uid()::text);
 
--- 8. Realtime so the app sees progress live
+-- 9. Realtime so the app sees progress live
 alter publication supabase_realtime add table public.videos;

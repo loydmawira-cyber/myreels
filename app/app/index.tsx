@@ -8,17 +8,17 @@ import { Button, s } from '../src/ui';
 export default function Home() {
   const router = useRouter();
   const [series, setSeries] = useState<Series[]>([]);
-  const [credits, setCredits] = useState<number | null>(null);
+  const [quota, setQuota] = useState<{ free_mode: boolean; credits: number; daily_limit: number; used_today: number } | null>(null);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: ser }, { data: prof }] = await Promise.all([
+    const [{ data: ser }, { data: q }] = await Promise.all([
       supabase.from('series').select('*').order('created_at', { ascending: false }),
-      supabase.from('profiles').select('credits').single(),
+      supabase.rpc('my_quota'),
     ]);
     setSeries(ser ?? []);
-    setCredits(prof?.credits ?? null);
+    setQuota(q ?? null);
     setLoading(false);
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -28,8 +28,10 @@ export default function Home() {
   return (
     <View style={s.screen}>
       <View style={[s.card, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
-        <Text style={s.p}>Credits left</Text>
-        <Text style={{ color: colors.text, fontSize: 22, fontWeight: '800' }}>{credits ?? '–'}</Text>
+        <Text style={s.p}>{quota?.free_mode ? 'Free videos left today' : 'Credits left'}</Text>
+        <Text style={{ color: colors.text, fontSize: 22, fontWeight: '800' }}>
+          {!quota ? '–' : quota.free_mode ? Math.max(0, quota.daily_limit - quota.used_today) : quota.credits}
+        </Text>
       </View>
       <FlatList
         data={series}

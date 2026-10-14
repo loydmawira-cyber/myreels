@@ -52,6 +52,7 @@ async function processJob(job) {
 }
 
 async function refundCredit(job) {
+  if (!job.used_credit) return; // free mode: nothing was spent (failed videos don't count toward daily limits)
   const { data } = await db.from('profiles').select('credits').eq('id', job.user_id).single();
   if (data) await db.from('profiles').update({ credits: data.credits + 1 }).eq('id', job.user_id);
 }

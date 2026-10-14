@@ -40,7 +40,7 @@ export const STATUS_LABEL: Record<string, string> = {
   voicing: 'Recording voiceover',
   rendering: 'Editing video',
   done: 'Ready',
-  failed: 'Failed (credit refunded)',
+  failed: 'Failed (not counted)',
 };
 
 export const colors = {
