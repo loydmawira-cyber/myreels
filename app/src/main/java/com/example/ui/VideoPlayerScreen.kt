@@ -9,20 +9,26 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
-import com.example.AppColors
 import com.example.data.SupabaseRepository
 import com.example.data.Video
 import kotlinx.coroutines.Dispatchers
@@ -32,12 +38,16 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.URL
 
+private const val FALLBACK_REEL_URL = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+
 @OptIn(UnstableApi::class)
 @Composable
 fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
     var video by remember { mutableStateOf<Video?>(null) }
     var videoUrl by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var isBuffering by remember { mutableStateOf(true) }
+    var playbackError by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -48,18 +58,48 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
         }
     }
 
+    fun playUrl(urlToPlay: String) {
+        try {
+            playbackError = null
+            isBuffering = true
+            val mediaItem = MediaItem.fromUri(urlToPlay)
+            exoPlayer.setMediaItem(mediaItem)
+            exoPlayer.prepare()
+            exoPlayer.play()
+        } catch (e: Exception) {
+            playbackError = e.localizedMessage
+            isBuffering = false
+        }
+    }
+
+    LaunchedEffect(exoPlayer) {
+        exoPlayer.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                isBuffering = (playbackState == Player.STATE_BUFFERING)
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                isBuffering = false
+                playbackError = "Playback error: ${error.errorCodeName}. Trying backup stream..."
+                // Fallback to secondary stream if primary fails
+                if (videoUrl != FALLBACK_REEL_URL) {
+                    videoUrl = FALLBACK_REEL_URL
+                    playUrl(FALLBACK_REEL_URL)
+                }
+            }
+        })
+    }
+
     LaunchedEffect(videoId) {
         val v = repo.getVideo(videoId)
         video = v
-        if (v?.video_path != null) {
-            val u = repo.getSignedUrl(v.video_path)
-            videoUrl = u
-            if (u != null) {
-                val mediaItem = MediaItem.fromUri(u)
-                exoPlayer.setMediaItem(mediaItem)
-                exoPlayer.prepare()
-            }
+        val targetPath = if (!v?.video_path.isNullOrBlank()) {
+            repo.getSignedUrl(v!!.video_path!!) ?: FALLBACK_REEL_URL
+        } else {
+            FALLBACK_REEL_URL
         }
+        videoUrl = targetPath
+        playUrl(targetPath)
     }
 
     DisposableEffect(Unit) {
@@ -69,12 +109,12 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
     }
 
     suspend fun downloadVideoToCache(): File? {
-        val u = videoUrl ?: return null
+        val u = videoUrl ?: FALLBACK_REEL_URL
         return withContext(Dispatchers.IO) {
             try {
                 val cacheDir = context.cacheDir
                 val file = File(cacheDir, "$videoId.mp4")
-                if (file.exists()) return@withContext file
+                if (file.exists() && file.length() > 0) return@withContext file
                 val inputStream = URL(u).openStream()
                 val outputStream = FileOutputStream(file)
                 inputStream.use { input ->
@@ -118,7 +158,7 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
             val file = downloadVideoToCache()
             busy = false
             if (file != null) {
-                Toast.makeText(context, "Reel saved to device cache ready for export", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Reel saved to device ready for export", Toast.LENGTH_LONG).show()
             } else {
                 Toast.makeText(context, "Could not save video to device", Toast.LENGTH_SHORT).show()
             }
@@ -136,33 +176,71 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(AppColors.Bg)
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
+        // Video Player Box with 9:16 aspect ratio
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(9f / 16f)
                 .clip(RoundedCornerShape(16.dp))
-                .background(androidx.compose.ui.graphics.Color.Black)
+                .background(Color.Black),
+            contentAlignment = Alignment.Center
         ) {
             AndroidView(
                 factory = { ctx ->
                     PlayerView(ctx).apply {
                         player = exoPlayer
                         useController = true
+                        setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
                     }
                 },
                 modifier = Modifier.fillMaxSize()
             )
+
+            if (isBuffering) {
+                CircularProgressIndicator(
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(48.dp)
+                )
+            }
+
+            if (playbackError != null) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(8.dp))
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        text = playbackError ?: "Error playing video",
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { playUrl(videoUrl ?: FALLBACK_REEL_URL) },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Retry")
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Retry Video")
+                    }
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = video?.title ?: "Video",
+            text = video?.title ?: "AI Generated Reel",
             style = MaterialTheme.typography.titleLarge,
-            fontSize = 20.sp
+            color = MaterialTheme.colorScheme.onBackground,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold
         )
 
         if (captionText.isNotBlank()) {
@@ -170,13 +248,13 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = AppColors.Card)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Suggested caption", color = AppColors.Muted, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("Suggested caption", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(6.dp))
                     SelectionContainer {
-                        Text(captionText, color = AppColors.Text, fontSize = 15.sp)
+                        Text(captionText, color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
                     }
                 }
             }
@@ -189,10 +267,10 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(50.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
             if (busy) {
-                CircularProgressIndicator(color = AppColors.Text, modifier = Modifier.size(24.dp))
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(24.dp))
             } else {
                 Text("Export & Share Reel", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
@@ -204,8 +282,7 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
             onClick = { saveToDevice() },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = AppColors.Text)
+                .height(50.dp)
         ) {
             Text("Save to local device", fontWeight = FontWeight.Bold, fontSize = 15.sp)
         }

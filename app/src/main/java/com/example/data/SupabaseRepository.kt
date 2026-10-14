@@ -325,7 +325,7 @@ class SupabaseRepository(context: Context) {
             delay(1500)
 
             // Stage 4: Rendering & Final Video (100%)
-            val sampleVideoUrl = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+            val sampleVideoUrl = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
             val finalVideo = voicingVideo.copy(
                 status = "done",
                 progress = 100,

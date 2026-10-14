@@ -130,9 +130,7 @@ fun SeriesDetailScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .clickable(enabled = isDone) {
-                                if (isDone) onNavigateVideo(item.id)
-                            },
+                            .clickable { onNavigateVideo(item.id) },
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = AppColors.Card)
                     ) {
