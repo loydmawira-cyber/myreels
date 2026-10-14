@@ -29,15 +29,6 @@ data class CreateSeriesRequest(
 )
 
 @Serializable
-data class UpdateVideoRequest(
-    val status: String,
-    val progress: Int,
-    val title: String? = null,
-    val script: ScriptContent? = null,
-    val video_path: String? = null
-)
-
-@Serializable
 data class ScriptContent(
     val title: String,
     val caption: String,

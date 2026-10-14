@@ -45,9 +45,6 @@ class SupabaseRepository(private val context: Context) {
         }
     }
 
-    val geminiService = GeminiService(context, client)
-    private val appScope = CoroutineScope(Dispatchers.IO)
-
     // Local persistent storage for Series
     private fun getLocalSeries(): MutableMap<String, Series> {
         val raw = prefs.getString("cached_series", null) ?: return mutableMapOf()
@@ -65,22 +62,10 @@ class SupabaseRepository(private val context: Context) {
         prefs.edit().putString("cached_series", json.encodeToString(map.values.toList())).apply()
     }
 
-    // Local persistent storage for Videos
-    private fun getLocalVideos(): MutableMap<String, Video> {
-        val raw = prefs.getString("cached_videos", null) ?: return mutableMapOf()
-        return try {
-            val list = json.decodeFromString<List<Video>>(raw)
-            list.associateBy { it.id }.toMutableMap()
-        } catch (e: Exception) {
-            mutableMapOf()
-        }
-    }
-
-    private fun saveLocalVideo(video: Video) {
-        val map = getLocalVideos()
-        map[video.id] = video
-        prefs.edit().putString("cached_videos", json.encodeToString(map.values.toList())).apply()
-    }
+    private fun errorMessage(body: String, fallback: String): String = try {
+        val o = Json.parseToJsonElement(body) as? JsonObject
+        ((o?.get("message") ?: o?.get("msg") ?: o?.get("error_description")) as? JsonPrimitive)?.content ?: fallback
+    } catch (e: Exception) { fallback }
 
     fun continueAsGuest() {
         accessToken = "guest_${UUID.randomUUID().toString().take(8)}"
@@ -142,22 +127,16 @@ class SupabaseRepository(private val context: Context) {
 
     suspend fun getQuota(): Quota? {
         val token = accessToken ?: return null
-        if (token.startsWith("guest_")) {
-            return Quota(free_mode = true, credits = 10, daily_limit = 5, used_today = 1)
-        }
+        if (token.startsWith("guest_")) return null
         return try {
             val resp = client.post("$url/rest/v1/rpc/my_quota") {
                 header("apikey", anonKey)
                 header("Authorization", "Bearer $token")
                 contentType(ContentType.Application.Json)
             }
-            if (resp.status.isSuccess()) {
-                resp.body<Quota>()
-            } else {
-                Quota(free_mode = true, credits = 5, daily_limit = 5, used_today = 0)
-            }
+            if (resp.status.isSuccess()) resp.body<Quota>() else null
         } catch (e: Exception) {
-            Quota(free_mode = true, credits = 5, daily_limit = 5, used_today = 0)
+            null
         }
     }
 
@@ -219,149 +198,96 @@ class SupabaseRepository(private val context: Context) {
         musicUrl: String?
     ): Result<Series> {
         val token = accessToken ?: return Result.failure(Exception("Not signed in"))
-        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-
-        val localFallback = Series(
-            id = "series_${UUID.randomUUID().toString().take(8)}",
-            name = name,
-            niche = niche,
-            custom_prompt = customPrompt?.ifBlank { null },
-            art_style = artStyle,
-            voice = voice,
-            target_seconds = targetSeconds,
-            music_url = musicUrl?.ifBlank { null },
-            created_at = nowIso
-        )
-
         if (token.startsWith("guest_")) {
-            saveLocalSeries(localFallback)
-            return Result.success(localFallback)
+            return Result.failure(Exception("Sign in with an account to create series and generate videos"))
         }
-
         return try {
             val userResp = client.get("$url/auth/v1/user") {
                 header("apikey", anonKey)
                 header("Authorization", "Bearer $token")
             }
             if (!userResp.status.isSuccess()) {
-                // Save locally so the user is never blocked
-                saveLocalSeries(localFallback)
-                return Result.success(localFallback)
+                return Result.failure(Exception("Session expired. Please sign in again."))
             }
-            val userInfo = userResp.body<UserInfo>()
-            val userId = userInfo.id
-
-            val requestBody = CreateSeriesRequest(
-                user_id = userId,
-                name = name,
-                niche = niche,
-                art_style = artStyle,
-                voice = voice,
-                target_seconds = targetSeconds,
-                custom_prompt = customPrompt?.ifBlank { null },
-                music_url = musicUrl?.ifBlank { null }
-            )
+            val userId = userResp.body<UserInfo>().id
 
             val resp = client.post("$url/rest/v1/series") {
                 header("apikey", anonKey)
                 header("Authorization", "Bearer $token")
                 header("Prefer", "return=representation")
                 contentType(ContentType.Application.Json)
-                setBody(requestBody)
+                setBody(
+                    CreateSeriesRequest(
+                        user_id = userId,
+                        name = name,
+                        niche = niche,
+                        art_style = artStyle,
+                        voice = voice,
+                        target_seconds = targetSeconds,
+                        custom_prompt = customPrompt?.ifBlank { null },
+                        music_url = musicUrl?.ifBlank { null }
+                    )
+                )
             }
             if (resp.status.isSuccess()) {
-                val list: List<Series> = resp.body()
-                val created = list.first()
+                val created = resp.body<List<Series>>().first()
                 saveLocalSeries(created)
                 Result.success(created)
             } else {
-                saveLocalSeries(localFallback)
-                Result.success(localFallback)
+                Result.failure(Exception(errorMessage(resp.bodyAsText(), "Could not create series")))
             }
         } catch (e: Exception) {
-            saveLocalSeries(localFallback)
-            Result.success(localFallback)
+            Result.failure(Exception("Network error: ${e.localizedMessage ?: "could not reach server"}"))
         }
     }
 
     suspend fun getVideos(seriesId: String): List<Video> {
-        val localMap = getLocalVideos()
-        val localMatching = localMap.values.filter { it.series_id == seriesId }
-        val token = accessToken ?: return localMatching
-        if (token.startsWith("guest_")) return localMatching
-
+        val token = accessToken ?: return emptyList()
+        if (token.startsWith("guest_")) return emptyList()
         return try {
             val resp = client.get("$url/rest/v1/videos?series_id=eq.$seriesId&select=*&order=created_at.desc") {
                 header("apikey", anonKey)
                 header("Authorization", "Bearer $token")
             }
-            if (resp.status.isSuccess()) {
-                val remoteList = resp.body<List<Video>>()
-                val combinedMap = remoteList.associateBy { it.id }.toMutableMap()
-                for (local in localMatching) {
-                    val remote = combinedMap[local.id]
-                    if (remote == null || local.progress > remote.progress) {
-                        combinedMap[local.id] = local
-                    }
-                }
-                combinedMap.values.sortedByDescending { it.created_at }
-            } else {
-                localMatching
-            }
+            if (resp.status.isSuccess()) resp.body<List<Video>>() else emptyList()
         } catch (e: Exception) {
-            localMatching
+            emptyList()
         }
     }
 
     suspend fun getVideo(id: String): Video? {
-        val local = getLocalVideos()[id]
-        if (local != null && local.status == "done") return local
-        val token = accessToken ?: return local
-        if (token.startsWith("guest_")) return local
-
+        val token = accessToken ?: return null
+        if (token.startsWith("guest_")) return null
         return try {
             val resp = client.get("$url/rest/v1/videos?id=eq.$id&select=*") {
                 header("apikey", anonKey)
                 header("Authorization", "Bearer $token")
             }
-            if (resp.status.isSuccess()) {
-                val list: List<Video> = resp.body()
-                val remote = list.firstOrNull()
-                if (local != null && remote != null && local.progress > remote.progress) local else (remote ?: local)
-            } else local
+            if (resp.status.isSuccess()) resp.body<List<Video>>().firstOrNull() else null
         } catch (e: Exception) {
-            local
+            null
         }
     }
 
     suspend fun deleteVideo(videoId: String): Boolean {
-        val localMap = getLocalVideos()
-        localMap.remove(videoId)
-        prefs.edit().putString("cached_videos", json.encodeToString(localMap.values.toList())).apply()
-
-        val token = accessToken ?: return true
-        if (token.startsWith("guest_")) return true
-
+        val token = accessToken ?: return false
+        if (token.startsWith("guest_")) return false
         return try {
-            val resp = client.delete("$url/rest/v1/videos?id=eq.$videoId") {
+            client.delete("$url/rest/v1/videos?id=eq.$videoId") {
                 header("apikey", anonKey)
                 header("Authorization", "Bearer $token")
-            }
-            resp.status.isSuccess()
+            }.status.isSuccess()
         } catch (e: Exception) {
-            true
+            false
         }
     }
 
+    /** Queues a video. The render worker (worker/) picks it up; the UI polls for progress. */
     suspend fun requestVideo(seriesId: String): Result<String> {
         val token = accessToken ?: return Result.failure(Exception("Not signed in"))
-        val localVideoId = "vid_${UUID.randomUUID().toString().take(8)}"
-
         if (token.startsWith("guest_")) {
-            startInAppVideoGeneration(seriesId, localVideoId)
-            return Result.success(localVideoId)
+            return Result.failure(Exception("Sign in with an account to generate videos"))
         }
-
         return try {
             val resp = client.post("$url/rest/v1/rpc/request_video") {
                 header("apikey", anonKey)
@@ -370,102 +296,12 @@ class SupabaseRepository(private val context: Context) {
                 setBody(mapOf("p_series_id" to seriesId))
             }
             if (resp.status.isSuccess()) {
-                val videoId = resp.bodyAsText().trim('"')
-                startInAppVideoGeneration(seriesId, videoId)
-                Result.success(videoId)
+                Result.success(resp.bodyAsText().trim('"'))
             } else {
-                // If backend RPC fails (e.g. quota limit, missing RPC, DB trigger), fall back to in-app pipeline
-                startInAppVideoGeneration(seriesId, localVideoId)
-                Result.success(localVideoId)
+                Result.failure(Exception(errorMessage(resp.bodyAsText(), "Could not start video generation")))
             }
         } catch (e: Exception) {
-            // On network failure or exception, continue in-app so user is not blocked
-            startInAppVideoGeneration(seriesId, localVideoId)
-            Result.success(localVideoId)
-        }
-    }
-
-    private fun startInAppVideoGeneration(seriesId: String, videoId: String) {
-        appScope.launch {
-            val token = accessToken ?: return@launch
-            val series = getSeries(seriesId) ?: return@launch
-            val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-
-            // Stage 1: Scripting with Gemini AI (25%)
-            val initialVideo = Video(
-                id = videoId,
-                series_id = seriesId,
-                status = "scripting",
-                progress = 25,
-                title = "Writing script with AI...",
-                created_at = nowIso
-            )
-            saveLocalVideo(initialVideo)
-            delay(1000)
-
-            val scriptResult = geminiService.generateReelScript(
-                niche = series.niche,
-                artStyle = series.art_style,
-                voice = series.voice,
-                durationSeconds = series.target_seconds,
-                customPrompt = series.custom_prompt
-            )
-            val generated = scriptResult.getOrNull()
-
-            // Stage 2: Imaging & Visual Storyboarding (55%)
-            val imagingVideo = initialVideo.copy(
-                status = "imaging",
-                progress = 55,
-                title = generated?.title ?: "Generating AI visuals..."
-            )
-            saveLocalVideo(imagingVideo)
-            delay(1500)
-
-            // Stage 3: Voicing & Sound Design (75%)
-            val voicingVideo = imagingVideo.copy(
-                status = "voicing",
-                progress = 75,
-                title = generated?.title ?: "Recording voiceover narration..."
-            )
-            saveLocalVideo(voicingVideo)
-            delay(1500)
-
-            // Stage 4: Rendering & Ready Video (100%)
-            val sampleVideoUrl = com.example.util.MediaUtils.getSampleReelUri(context)
-            val finalVideo = voicingVideo.copy(
-                status = "done",
-                progress = 100,
-                title = generated?.title ?: "${series.name} - Reel",
-                script = ScriptContent(
-                    title = generated?.title ?: "${series.name} - Reel",
-                    caption = generated?.caption ?: "Check out this incredible reel!",
-                    hashtags = generated?.hashtags ?: listOf(series.niche, "reels", "shorts", "viral")
-                ),
-                video_path = sampleVideoUrl
-            )
-            saveLocalVideo(finalVideo)
-
-            // Update Supabase remote record if not guest
-            if (!token.startsWith("guest_")) {
-                try {
-                    val updateReq = UpdateVideoRequest(
-                        status = "done",
-                        progress = 100,
-                        title = finalVideo.title,
-                        script = finalVideo.script,
-                        video_path = finalVideo.video_path
-                    )
-                    client.patch("$url/rest/v1/videos?id=eq.$videoId") {
-                        header("apikey", anonKey)
-                        header("Authorization", "Bearer $token")
-                        header("Prefer", "return=representation")
-                        contentType(ContentType.Application.Json)
-                        setBody(updateReq)
-                    }
-                } catch (e: Exception) {
-                    // Local copy remains authoritative
-                }
-            }
+            Result.failure(Exception("Network error: ${e.localizedMessage ?: "could not reach server"}"))
         }
     }
 
