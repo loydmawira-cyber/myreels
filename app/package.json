@@ -1,0 +1,34 @@
+{
+  "name": "faceless-app",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "build:apk": "eas build -p android --profile preview",
+    "build:play": "eas build -p android --profile production"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "*",
+    "@supabase/supabase-js": "^2.45.0",
+    "expo": "*",
+    "expo-constants": "*",
+    "expo-file-system": "*",
+    "expo-linking": "*",
+    "expo-media-library": "*",
+    "expo-router": "*",
+    "expo-sharing": "*",
+    "expo-status-bar": "*",
+    "expo-video": "*",
+    "react": "*",
+    "react-native": "*",
+    "react-native-safe-area-context": "*",
+    "react-native-screens": "*",
+    "react-native-url-polyfill": "^2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/react": "*"
+  }
+}

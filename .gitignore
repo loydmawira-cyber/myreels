@@ -1,0 +1,28 @@
+# Secrets: never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.jks
+*.keystore
+credentials.json
+google-services.json
+service-account*.json
+
+# Dependencies and build output
+node_modules/
+.expo/
+dist/
+web-build/
+android/
+ios/
+*.apk
+*.aab
+
+# Rendered media and OS junk
+*.mp4
+!**/assets/**/*.mp4
+.DS_Store
+Thumbs.db
+npm-debug.log*
