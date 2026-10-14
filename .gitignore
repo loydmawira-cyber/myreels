@@ -6,6 +6,7 @@
 *.key
 *.jks
 *.keystore
+!debug.keystore
 credentials.json
 google-services.json
 service-account*.json

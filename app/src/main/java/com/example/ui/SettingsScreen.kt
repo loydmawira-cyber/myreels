@@ -92,7 +92,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
-                Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                 Spacer(modifier = Modifier.height(20.dp))
 
                 // HD Rendering Switch
@@ -126,7 +126,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
-                Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                 Spacer(modifier = Modifier.height(20.dp))
 
                 // Auto Save Switch
