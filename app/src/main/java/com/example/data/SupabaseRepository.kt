@@ -21,7 +21,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-class SupabaseRepository(context: Context) {
+class SupabaseRepository(private val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("supabase_auth", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; encodeDefaults = false }
     
@@ -325,7 +325,7 @@ class SupabaseRepository(context: Context) {
             delay(1500)
 
             // Stage 4: Rendering & Final Video (100%)
-            val sampleVideoUrl = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+            val sampleVideoUrl = "android.resource://${context.packageName}/${com.example.R.raw.sample_reel}"
             val finalVideo = voicingVideo.copy(
                 status = "done",
                 progress = 100,

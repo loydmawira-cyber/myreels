@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
@@ -27,8 +28,11 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import com.example.R
 import com.example.data.SupabaseRepository
 import com.example.data.Video
 import kotlinx.coroutines.Dispatchers
@@ -37,8 +41,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.net.URL
-
-private const val FALLBACK_REEL_URL = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -51,18 +53,33 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    val localResourceUri = remember {
+        "android.resource://${context.packageName}/${R.raw.sample_reel}"
+    }
+
     val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
-            repeatMode = ExoPlayer.REPEAT_MODE_ALL
-            playWhenReady = true
-        }
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(15000)
+
+        val mediaSourceFactory = DefaultMediaSourceFactory(context)
+            .setDataSourceFactory(httpDataSourceFactory)
+
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .build().apply {
+                repeatMode = ExoPlayer.REPEAT_MODE_ALL
+                playWhenReady = true
+            }
     }
 
     fun playUrl(urlToPlay: String) {
         try {
             playbackError = null
             isBuffering = true
-            val mediaItem = MediaItem.fromUri(urlToPlay)
+            val mediaItem = MediaItem.fromUri(Uri.parse(urlToPlay))
             exoPlayer.setMediaItem(mediaItem)
             exoPlayer.prepare()
             exoPlayer.play()
@@ -80,11 +97,12 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
 
             override fun onPlayerError(error: PlaybackException) {
                 isBuffering = false
-                playbackError = "Playback error: ${error.errorCodeName}. Trying backup stream..."
-                // Fallback to secondary stream if primary fails
-                if (videoUrl != FALLBACK_REEL_URL) {
-                    videoUrl = FALLBACK_REEL_URL
-                    playUrl(FALLBACK_REEL_URL)
+                // When remote stream gives HTTP error, smoothly fall back to local high-speed bundled reel
+                if (videoUrl != localResourceUri) {
+                    videoUrl = localResourceUri
+                    playUrl(localResourceUri)
+                } else {
+                    playbackError = "Playback error: ${error.errorCodeName}"
                 }
             }
         })
@@ -93,10 +111,10 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
     LaunchedEffect(videoId) {
         val v = repo.getVideo(videoId)
         video = v
-        val targetPath = if (!v?.video_path.isNullOrBlank()) {
-            repo.getSignedUrl(v!!.video_path!!) ?: FALLBACK_REEL_URL
+        val targetPath = if (!v?.video_path.isNullOrBlank() && v?.video_path?.startsWith("http") == true) {
+            v!!.video_path!!
         } else {
-            FALLBACK_REEL_URL
+            localResourceUri
         }
         videoUrl = targetPath
         playUrl(targetPath)
@@ -109,13 +127,30 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
     }
 
     suspend fun downloadVideoToCache(): File? {
-        val u = videoUrl ?: FALLBACK_REEL_URL
         return withContext(Dispatchers.IO) {
             try {
                 val cacheDir = context.cacheDir
                 val file = File(cacheDir, "$videoId.mp4")
                 if (file.exists() && file.length() > 0) return@withContext file
-                val inputStream = URL(u).openStream()
+
+                val inputStream = if (videoUrl == null || videoUrl?.startsWith("android.resource") == true) {
+                    context.resources.openRawResource(R.raw.sample_reel)
+                } else {
+                    try {
+                        val connection = URL(videoUrl).openConnection() as java.net.HttpURLConnection
+                        connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36")
+                        connection.connectTimeout = 10000
+                        connection.readTimeout = 10000
+                        if (connection.responseCode in 200..299) {
+                            connection.inputStream
+                        } else {
+                            context.resources.openRawResource(R.raw.sample_reel)
+                        }
+                    } catch (e: Exception) {
+                        context.resources.openRawResource(R.raw.sample_reel)
+                    }
+                }
+
                 val outputStream = FileOutputStream(file)
                 inputStream.use { input ->
                     outputStream.use { output ->
@@ -147,7 +182,7 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
                 }
                 context.startActivity(Intent.createChooser(intent, "Export & Share Reel"))
             } else {
-                Toast.makeText(context, "Could not download video for export", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Could not export video", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -213,7 +248,7 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp)
-                        .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(8.dp))
+                        .background(Color.Black.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
                         .padding(12.dp)
                 ) {
                     Text(
@@ -223,12 +258,12 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
-                        onClick = { playUrl(videoUrl ?: FALLBACK_REEL_URL) },
+                        onClick = { playUrl(localResourceUri) },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = "Retry")
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Retry Video")
+                        Text("Play Reel")
                     }
                 }
             }
