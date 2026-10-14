@@ -36,7 +36,6 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.example.data.SupabaseRepository
 import com.example.data.Video
-import com.example.util.MediaUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,9 +54,6 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val localResourceUri = remember {
-        MediaUtils.getSampleReelUri(context)
-    }
 
     val exoPlayer = remember {
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
@@ -103,13 +99,7 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
 
             override fun onPlayerError(error: PlaybackException) {
                 isBuffering = false
-                // When remote stream gives network error, smoothly fall back to local high-speed bundled reel
-                if (videoUrl != localResourceUri) {
-                    videoUrl = localResourceUri
-                    playUrl(localResourceUri)
-                } else {
-                    playbackError = "Playback error: ${error.errorCodeName}"
-                }
+                playbackError = "Playback error: ${error.errorCodeName}"
             }
         })
     }
@@ -117,16 +107,15 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
     LaunchedEffect(videoId) {
         val v = repo.getVideo(videoId)
         video = v
-        val targetPath: String = when {
-            v?.video_path.isNullOrBlank() -> localResourceUri
-            v?.video_path?.startsWith("http://") == true || v?.video_path?.startsWith("https://") == true -> v.video_path!!
-            v?.video_path?.startsWith("android.resource") == true || v?.video_path?.startsWith("rawresource") == true -> v.video_path!!
-            v?.video_path?.startsWith("file://") == true -> v.video_path!!
-            else -> {
-                // Supabase storage relative path: attempt to sign or use local
-                val signed = repo.getSignedUrl(v!!.video_path!!)
-                signed ?: localResourceUri
-            }
+        val path = v?.video_path
+        if (path.isNullOrBlank()) {
+            playbackError = if (v?.status == "failed") (v?.error ?: "Video generation failed") else "This video is not ready yet"
+            return@LaunchedEffect
+        }
+        val targetPath = repo.getSignedUrl(path)
+        if (targetPath == null) {
+            playbackError = "Could not load the video. Check your connection and try again."
+            return@LaunchedEffect
         }
         videoUrl = targetPath
         playUrl(targetPath)
@@ -145,25 +134,12 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
                 val file = File(cacheDir, "${videoId.replace("/", "_")}.mp4")
                 if (file.exists() && file.length() > 0) return@withContext file
 
-                val inputStream = if (videoUrl == null ||
-                    videoUrl?.startsWith("android.resource") == true ||
-                    videoUrl?.startsWith("rawresource") == true) {
-                    MediaUtils.openSampleReelStream(context) ?: URL(MediaUtils.FALLBACK_REEL_URL).openStream()
-                } else {
-                    try {
-                        val connection = URL(videoUrl).openConnection() as java.net.HttpURLConnection
-                        connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36")
-                        connection.connectTimeout = 10000
-                        connection.readTimeout = 10000
-                        if (connection.responseCode in 200..299) {
-                            connection.inputStream
-                        } else {
-                            MediaUtils.openSampleReelStream(context) ?: URL(MediaUtils.FALLBACK_REEL_URL).openStream()
-                        }
-                    } catch (e: Exception) {
-                        MediaUtils.openSampleReelStream(context) ?: URL(MediaUtils.FALLBACK_REEL_URL).openStream()
-                    }
-                }
+                val source = videoUrl ?: return@withContext null
+                val connection = URL(source).openConnection() as java.net.HttpURLConnection
+                connection.connectTimeout = 15000
+                connection.readTimeout = 30000
+                if (connection.responseCode !in 200..299) return@withContext null
+                val inputStream = connection.inputStream
 
                 val outputStream = FileOutputStream(file)
                 inputStream.use { input ->
@@ -275,14 +251,14 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
                         onClick = {
-                            videoUrl = localResourceUri
-                            playUrl(localResourceUri)
+                            val u = videoUrl
+                            if (u != null) playUrl(u)
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = "Retry")
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Play Reel")
+                        Text("Retry")
                     }
                 }
             }

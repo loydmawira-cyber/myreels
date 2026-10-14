@@ -177,6 +177,13 @@ fun SeriesDetailScreen(
                                     color = if (item.status == "failed") AppColors.Danger else AppColors.Muted,
                                     fontSize = 14.sp
                                 )
+                                if (item.status == "failed" && !item.error.isNullOrBlank()) {
+                                    Text(
+                                        text = item.error,
+                                        color = AppColors.Muted,
+                                        fontSize = 12.sp
+                                    )
+                                }
 
                                 if (item.status != "done" && item.status != "failed") {
                                     Spacer(modifier = Modifier.height(8.dp))
@@ -216,7 +223,7 @@ fun SeriesDetailScreen(
                     ) {
                         CircularProgressIndicator(color = AppColors.Accent, modifier = Modifier.size(48.dp))
                         Text(
-                            text = "AI is generating script & rendering video...",
+                            text = "Queuing your video...",
                             color = AppColors.Text,
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp
