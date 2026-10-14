@@ -1,6 +1,6 @@
 // External providers, each behind one function so they can be swapped for paid ones later:
 //   generateScript()  Gemini (free tier)         -> swap for any LLM
-//   fetchClip()       Pexels stock video (free)  -> swap for Veo / Kling / Runway
+//   fetchClip()       Pexels/Pixabay stock video -> swap for Veo / Kling / Runway
 //   synthesize()      edge-tts (free)            -> swap for OpenAI TTS / ElevenLabs
 import fs from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
@@ -121,10 +121,41 @@ export async function synthesize(text, voiceId, outFile) {
   throw new Error(`Voiceover failed: ${lastErr.message}`);
 }
 
-// ---------- Stock clips (Pexels) ----------
-export async function fetchClip({ queries, minDuration, used, outFile }) {
+// ---------- Stock clips (Pexels or Pixabay) ----------
+export function fetchClip(args) {
+  // Pexels (portrait clips) when its key exists, otherwise Pixabay.
+  return process.env.PEXELS_API_KEY ? fetchPexels(args) : fetchPixabay(args);
+}
+
+async function fetchPixabay({ queries, minDuration, used, outFile }) {
+  const key = process.env.PIXABAY_API_KEY;
+  if (!key) throw new Error('Set PEXELS_API_KEY or PIXABAY_API_KEY');
+  for (const q of queries.filter(Boolean)) {
+    const url = new URL('https://pixabay.com/api/videos/');
+    url.searchParams.set('key', key);
+    url.searchParams.set('q', q.slice(0, 100));
+    url.searchParams.set('per_page', '20');
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Pixabay ${res.status}`);
+    const { hits = [] } = await res.json();
+    const fresh = hits.filter((v) => !used.has(v.id) && v.duration >= 3);
+    const long = fresh.filter((v) => v.duration >= minDuration);
+    const pool = (long.length ? long : fresh).slice(0, 8);
+    if (!pool.length) continue;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    const file = ['large', 'medium', 'small']
+      .map((k) => pick.videos?.[k])
+      .find((f) => f && f.url && (!f.size || f.size <= 60 * 1024 * 1024));
+    if (!file) continue;
+    used.add(pick.id);
+    await download(file.url, outFile);
+    return;
+  }
+  throw new Error(`No stock clip found for: ${queries.filter(Boolean).join(' | ')}`);
+}
+
+async function fetchPexels({ queries, minDuration, used, outFile }) {
   const key = process.env.PEXELS_API_KEY;
-  if (!key) throw new Error('PEXELS_API_KEY is not set');
 
   for (const q of queries.filter(Boolean)) {
     for (const orientation of ['portrait', null]) {
