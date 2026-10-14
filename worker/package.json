@@ -1,0 +1,9 @@
+{
+  "name": "myreels-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Render worker for MyReels: script (Gemini) + stock clips (Pexels) + voice (edge-tts) + FFmpeg",
+  "scripts": { "start": "node src/index.js" },
+  "engines": { "node": ">=20" }
+}
