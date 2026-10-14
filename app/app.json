@@ -7,7 +7,7 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "android": {
-      "package": "com.yourname.myreels"
+      "package": "com.smarttechlab.myreels"
     },
     "plugins": [
       "expo-router",
