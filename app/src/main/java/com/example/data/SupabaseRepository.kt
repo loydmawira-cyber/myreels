@@ -431,7 +431,7 @@ class SupabaseRepository(private val context: Context) {
             delay(1500)
 
             // Stage 4: Rendering & Ready Video (100%)
-            val sampleVideoUrl = "android.resource://${context.packageName}/${com.example.R.raw.sample_reel}"
+            val sampleVideoUrl = com.example.util.MediaUtils.getSampleReelUri(context)
             val finalVideo = voicingVideo.copy(
                 status = "done",
                 progress = 100,

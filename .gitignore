@@ -24,6 +24,8 @@ ios/
 # Rendered media and OS junk
 *.mp4
 !**/assets/**/*.mp4
+!**/res/raw/*.mp4
+!**/res/raw/**
 .DS_Store
 Thumbs.db
 npm-debug.log*

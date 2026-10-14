@@ -34,9 +34,9 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
-import com.example.R
 import com.example.data.SupabaseRepository
 import com.example.data.Video
+import com.example.util.MediaUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -56,7 +56,7 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
     val scope = rememberCoroutineScope()
 
     val localResourceUri = remember {
-        "android.resource://${context.packageName}/${R.raw.sample_reel}"
+        MediaUtils.getSampleReelUri(context)
     }
 
     val exoPlayer = remember {
@@ -148,7 +148,7 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
                 val inputStream = if (videoUrl == null ||
                     videoUrl?.startsWith("android.resource") == true ||
                     videoUrl?.startsWith("rawresource") == true) {
-                    context.resources.openRawResource(R.raw.sample_reel)
+                    MediaUtils.openSampleReelStream(context) ?: URL(MediaUtils.FALLBACK_REEL_URL).openStream()
                 } else {
                     try {
                         val connection = URL(videoUrl).openConnection() as java.net.HttpURLConnection
@@ -158,10 +158,10 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
                         if (connection.responseCode in 200..299) {
                             connection.inputStream
                         } else {
-                            context.resources.openRawResource(R.raw.sample_reel)
+                            MediaUtils.openSampleReelStream(context) ?: URL(MediaUtils.FALLBACK_REEL_URL).openStream()
                         }
                     } catch (e: Exception) {
-                        context.resources.openRawResource(R.raw.sample_reel)
+                        MediaUtils.openSampleReelStream(context) ?: URL(MediaUtils.FALLBACK_REEL_URL).openStream()
                     }
                 }
 
