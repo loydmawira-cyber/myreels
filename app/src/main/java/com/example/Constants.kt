@@ -41,7 +41,7 @@ object Constants {
     val STATUS_LABELS = mapOf(
         "queued" to "Waiting in line",
         "scripting" to "Writing script",
-        "imaging" to "Creating images",
+        "imaging" to "Finding video clips",
         "voicing" to "Recording voiceover",
         "rendering" to "Editing video",
         "done" to "Ready",
