@@ -23,6 +23,7 @@ android {
 
         buildConfigField("String", "SUPABASE_URL", "\"https://nwzwmmutoidsmdzvcuxf.supabase.co\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"sb_publishable_YJdMQEx7rqosN7npkYLvlw_Q_trNt4s\"")
+        buildConfigField("String", "GEMINI_API_KEY", "\"\"")
     }
 
     signingConfigs {

@@ -17,6 +17,27 @@ data class Series(
 )
 
 @Serializable
+data class CreateSeriesRequest(
+    val user_id: String,
+    val name: String,
+    val niche: String,
+    val art_style: String,
+    val voice: String,
+    val target_seconds: Int,
+    val custom_prompt: String? = null,
+    val music_url: String? = null
+)
+
+@Serializable
+data class UpdateVideoRequest(
+    val status: String,
+    val progress: Int,
+    val title: String? = null,
+    val script: ScriptContent? = null,
+    val video_path: String? = null
+)
+
+@Serializable
 data class ScriptContent(
     val title: String,
     val caption: String,

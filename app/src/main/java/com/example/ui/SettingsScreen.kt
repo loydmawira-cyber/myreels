@@ -31,6 +31,9 @@ fun SettingsScreen(onBack: () -> Unit) {
     var autoSave by remember {
         mutableStateOf(prefs.getBoolean("auto_save", false))
     }
+    var geminiApiKey by remember {
+        mutableStateOf(prefs.getString("gemini_api_key", "") ?: "")
+    }
 
     Column(
         modifier = Modifier
@@ -40,7 +43,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             .padding(20.dp)
     ) {
         Text(
-            text = "App Settings & Preferences",
+            text = "App Settings & AI Config",
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onBackground,
             fontSize = 24.sp,
@@ -48,7 +51,7 @@ fun SettingsScreen(onBack: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Configure ambient background music and video generation parameters.",
+            text = "Configure ambient background music, AI models, and video generation parameters.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
             modifier = Modifier.padding(bottom = 24.dp)
@@ -156,6 +159,37 @@ fun SettingsScreen(onBack: () -> Unit) {
                             prefs.edit().putBoolean("auto_save", it).apply()
                         },
                         colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Gemini API Key Field (Optional)
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "Gemini API Key (Optional)",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Uses Gemini 3.5 Flash for customized viral scripts and titles",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = geminiApiKey,
+                        onValueChange = {
+                            geminiApiKey = it
+                            prefs.edit().putString("gemini_api_key", it.trim()).apply()
+                        },
+                        placeholder = { Text("Paste AI Studio / Gemini API Key") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
                     )
                 }
             }
