@@ -1,0 +1,57 @@
+name: Render worker
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [render-video]     # fired by the Supabase trigger (supabase/migrations/002_worker_trigger.sql)
+  schedule:
+    - cron: '7 * * * *'       # hourly safety net
+
+concurrency:
+  group: render-worker
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+      RETENTION_DAYS: ${{ vars.RETENTION_DAYS }}
+    steps:
+      - name: Anything to render?
+        id: check
+        run: |
+          AUTH=()
+          case "$SUPABASE_SERVICE_ROLE_KEY" in eyJ*) AUTH=(-H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY");; esac
+          RES=$(curl -fsS "$SUPABASE_URL/rest/v1/videos?status=in.(queued,scripting,imaging,voicing,rendering)&select=id&limit=1" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" "${AUTH[@]}")
+          if [ "$RES" = "[]" ]; then echo "pending=no" >> "$GITHUB_OUTPUT"; else echo "pending=yes" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.pending == 'yes'
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.pending == 'yes'
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.pending == 'yes'
+        with:
+          python-version: '3.12'
+
+      - name: Install ffmpeg, fonts, edge-tts
+        if: steps.check.outputs.pending == 'yes'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          pip install -q -U edge-tts
+
+      - name: Render queued videos
+        if: steps.check.outputs.pending == 'yes'
+        run: node worker/src/index.js
