@@ -101,14 +101,16 @@ fun LoginScreen(repo: SupabaseRepository, onLoggedIn: () -> Unit) {
                         busy = false
                         res.fold(
                             onSuccess = { onLoggedIn() },
-                            onFailure = { Toast.makeText(context, it.localizedMessage ?: "Sign in failed", Toast.LENGTH_LONG).show() }
+                            onFailure = { 
+                                Toast.makeText(context, "Sign in failed: ${it.localizedMessage}. You can also use Demo Mode.", Toast.LENGTH_LONG).show() 
+                            }
                         )
                     } else {
                         val res = repo.signUp(email.trim(), password)
                         busy = false
                         res.fold(
-                            onSuccess = { Toast.makeText(context, "Check your email to confirm your address.", Toast.LENGTH_LONG).show() },
-                            onFailure = { Toast.makeText(context, it.localizedMessage ?: "Sign up failed", Toast.LENGTH_LONG).show() }
+                            onSuccess = { Toast.makeText(context, "Account created! Check your email to confirm or sign in.", Toast.LENGTH_LONG).show() },
+                            onFailure = { Toast.makeText(context, "Sign up failed: ${it.localizedMessage}", Toast.LENGTH_LONG).show() }
                         )
                     }
                 }
@@ -123,6 +125,21 @@ fun LoginScreen(repo: SupabaseRepository, onLoggedIn: () -> Unit) {
             } else {
                 Text(if (mode == "in") "Sign in" else "Create account", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        OutlinedButton(
+            onClick = {
+                repo.continueAsGuest()
+                Toast.makeText(context, "Welcome to MyReels Demo!", Toast.LENGTH_SHORT).show()
+                onLoggedIn()
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+        ) {
+            Text("Continue in Demo Mode (Instant Access)", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
         }
 
         Spacer(modifier = Modifier.height(8.dp))

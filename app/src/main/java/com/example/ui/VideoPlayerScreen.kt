@@ -13,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,6 +29,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -64,8 +66,9 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
             .setConnectTimeoutMs(15000)
             .setReadTimeoutMs(15000)
 
-        val mediaSourceFactory = DefaultMediaSourceFactory(context)
-            .setDataSourceFactory(httpDataSourceFactory)
+        // DefaultDataSource handles android.resource://, file://, content:// and falls back to httpDataSourceFactory
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
         ExoPlayer.Builder(context)
             .setMediaSourceFactory(mediaSourceFactory)
@@ -93,11 +96,14 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
         exoPlayer.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 isBuffering = (playbackState == Player.STATE_BUFFERING)
+                if (playbackState == Player.STATE_READY) {
+                    playbackError = null
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
                 isBuffering = false
-                // When remote stream gives HTTP error, smoothly fall back to local high-speed bundled reel
+                // When remote stream gives network error, smoothly fall back to local high-speed bundled reel
                 if (videoUrl != localResourceUri) {
                     videoUrl = localResourceUri
                     playUrl(localResourceUri)
@@ -111,10 +117,16 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
     LaunchedEffect(videoId) {
         val v = repo.getVideo(videoId)
         video = v
-        val targetPath = if (!v?.video_path.isNullOrBlank() && v?.video_path?.startsWith("http") == true) {
-            v!!.video_path!!
-        } else {
-            localResourceUri
+        val targetPath: String = when {
+            v?.video_path.isNullOrBlank() -> localResourceUri
+            v?.video_path?.startsWith("http://") == true || v?.video_path?.startsWith("https://") == true -> v.video_path!!
+            v?.video_path?.startsWith("android.resource") == true || v?.video_path?.startsWith("rawresource") == true -> v.video_path!!
+            v?.video_path?.startsWith("file://") == true -> v.video_path!!
+            else -> {
+                // Supabase storage relative path: attempt to sign or use local
+                val signed = repo.getSignedUrl(v!!.video_path!!)
+                signed ?: localResourceUri
+            }
         }
         videoUrl = targetPath
         playUrl(targetPath)
@@ -130,10 +142,12 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
         return withContext(Dispatchers.IO) {
             try {
                 val cacheDir = context.cacheDir
-                val file = File(cacheDir, "$videoId.mp4")
+                val file = File(cacheDir, "${videoId.replace("/", "_")}.mp4")
                 if (file.exists() && file.length() > 0) return@withContext file
 
-                val inputStream = if (videoUrl == null || videoUrl?.startsWith("android.resource") == true) {
+                val inputStream = if (videoUrl == null ||
+                    videoUrl?.startsWith("android.resource") == true ||
+                    videoUrl?.startsWith("rawresource") == true) {
                     context.resources.openRawResource(R.raw.sample_reel)
                 } else {
                     try {
@@ -203,8 +217,10 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
     val captionText = buildString {
         video?.script?.let {
             append(it.caption)
-            append("\n\n")
-            append(it.hashtags.joinToString(" ") { h -> "#$h" })
+            if (it.hashtags.isNotEmpty()) {
+                append("\n\n")
+                append(it.hashtags.joinToString(" ") { h -> if (h.startsWith("#")) h else "#$h" })
+            }
         }
     }
 
@@ -235,7 +251,7 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
                 modifier = Modifier.fillMaxSize()
             )
 
-            if (isBuffering) {
+            if (isBuffering && playbackError == null) {
                 CircularProgressIndicator(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(48.dp)
@@ -258,7 +274,10 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
-                        onClick = { playUrl(localResourceUri) },
+                        onClick = {
+                            videoUrl = localResourceUri
+                            playUrl(localResourceUri)
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = "Retry")
@@ -286,7 +305,7 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Suggested caption", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("Suggested caption & hashtags", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(6.dp))
                     SelectionContainer {
                         Text(captionText, color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
@@ -307,6 +326,8 @@ fun VideoPlayerScreen(videoId: String, repo: SupabaseRepository) {
             if (busy) {
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(24.dp))
             } else {
+                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 Text("Export & Share Reel", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
         }
